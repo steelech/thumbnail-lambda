@@ -45,7 +45,9 @@ const uploadFileToS3 = filename => {
       };
       s3.putObject(params, (perr, pres) => {
         if (perr) {
-          console.log('error: ', perr);
+          console.log('error uploading to S3: ', perr);
+        } else {
+          console.log('s3 upload successful');
         }
         resolve();
       });
