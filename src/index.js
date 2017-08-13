@@ -1,14 +1,54 @@
 const AWS = require('aws-sdk');
-// const gm = require('gm').subClass({ imageMagick: true });
+const gm = require('gm').subClass({ imageMagick: true });
 const util = require('util');
 
 const s3 = new AWS.S3();
 
+const contentTypes = {
+  'image/png': 'png',
+  'image/jpeg': 'jpeg'
+};
+
+const resizeImage = (maxHeight, maxWidth, image) => {
+  return new Promise((resolve, reject) => {
+    gm(image.Body).size((err, size) => {
+      var scalingFactor = Math.min(
+        maxWidth / size.width,
+        maxHeight / size.height
+      );
+
+      var width = scalingFactor * size.width;
+      var height = scalingFactor * size.height;
+
+      const params = {
+        width,
+        height,
+        customArgs: ['-define', 'jpeg:extent=500kb']
+      };
+
+      gm(image.Body)
+        .resize(width, height)
+        .toBuffer(contentTypes[image.ContentType], (err, buffer) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(buffer);
+          }
+        });
+    });
+  });
+};
+
 const uploadThumbnail = (srcKey, data) => {
   const Bucket = `erica-charlie-pics-thumbnails`;
   const Key = `thumbnail-${srcKey}`;
+  const ContentType = data.ContentType;
 
-  uploadImage(Bucket, Key, data)
+  resizeImage(200, 200, data)
+    .then(buffer => uploadImage(Bucket, Key, buffer, ContentType))
+    .catch(err => {
+      console.log(`error resizing image: ${err}`);
+    })
     .then(() => console.log('thumbnail upload successful'))
     .catch(err => console.log(`error uploading thumbnail: ${err}`));
 };
@@ -16,9 +56,14 @@ const uploadThumbnail = (srcKey, data) => {
 const uploadSlideshowSized = (srcKey, data) => {
   const Bucket = `erica-charlie-pics-slideshow`;
   const Key = `slideshow-${srcKey}`;
+  const ContentType = data.ContentType;
 
-  uploadImage(Bucket, Key, data)
-    .then(() => console.log('slidshow upload successful'))
+  resizeImage(400, 400, data)
+    .then(buffer => uploadImage(Bucket, Key, buffer, ContentType))
+    .catch(err => {
+      console.log(`error resizing image: ${err}`);
+    })
+    .then(() => console.log('slideshow upload successful'))
     .catch(err => console.log(`error uploading slideshow: ${err}`));
 };
 
@@ -34,19 +79,20 @@ const downloadImage = (Bucket, Key) => {
         console.log('ERROR: ', err);
         reject(err);
       } else {
+        console.log(`RESPONSE: ${util.inspect(response, { depth: 5 })}`);
         resolve(response);
       }
     });
   });
 };
 
-const uploadImage = (Bucket, Key, response) => {
+const uploadImage = (Bucket, Key, buffer, ContentType) => {
   const params = {
     Bucket,
     Key,
-    Body: response.Body,
+    Body: buffer,
     ACL: 'public-read',
-    ContentType: response.ContentType
+    ContentType: ContentType
   };
   // upload the image to S3
   return new Promise((resolve, reject) => {
@@ -66,7 +112,9 @@ exports.handler = (event, context, callback) => {
     util.inspect(event, { depth: 5 })
   );
   const srcBucket = event.Records[0].s3.bucket.name;
-  const srcKey = event.Records[0].s3.object.key;
+  const srcKey = decodeURIComponent(
+    event.Records[0].s3.object.key.replace(/\+/g, ' ')
+  );
   const thumbnailDestBucket = `erica-charlie-pics-thumbnails`;
   const thumbnailDestKey = `thumbnail-${srcKey}`;
 
